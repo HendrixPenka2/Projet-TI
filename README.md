@@ -4,8 +4,8 @@ Ce projet est une application de web-mapping qui permet de visualiser les donné
 
 ## Aperçu de l'application
 
-![Aperçu de l'application](https://i.imgur.com/example.png) 
-*(Note: Remplacez l'URL par une vraie capture d'écran de votre application)*
+![Aperçu de l'application](dans la racine du projet: Aperçu de l'application.png) 
+
 
 ---
 
@@ -24,8 +24,8 @@ Avant de commencer, assurez-vous d'avoir installé les logiciels suivants :
 
 **Étape 1 : Cloner le projet**
 ```bash
-git clone <URL_DU_PROJET>
-cd <NOM_DU_DOSSIER_PROJET>
+git clone <https://github.com/Hendrixpenka/Projet-TI.git>
+cd <Projet-TI>
 ```
 
 **Étape 2 : Créer un environnement virtuel et installer les dépendances Python**
@@ -49,11 +49,11 @@ pip install -r requirements.txt
 L'application nécessite une base de données PostgreSQL avec PostGIS activé.
 
 1.  **Créez un utilisateur et une base de données.**
-    *Ouvrez une session `psql` et exécutez les commandes suivantes. Remplacez `donpk` et `18151995` par le nom d'utilisateur et le mot de passe de votre choix.*
+    *Ouvrez une session `psql` et exécutez les commandes suivantes. Remplacez `donpk` et `MDP` par le nom d'utilisateur et le mot de passe de votre choix.*
 
     ```sql
     -- Créez un nouvel utilisateur (role)
-    CREATE ROLE donpk WITH LOGIN PASSWORD '18151995';
+    CREATE ROLE donpk WITH LOGIN PASSWORD 'MDP';
 
     -- Créez la base de données et donnez les droits à votre nouvel utilisateur
     CREATE DATABASE cameroun_production_db OWNER donpk;
@@ -87,7 +87,7 @@ DB_CONFIG = {
     'port': 5432,
     'database': 'cameroun_production_db',
     'user': 'donpk',         # Votre nom d'utilisateur
-    'password': '18151995'    # Votre mot de passe
+    'password': 'MDP'    # Votre mot de passe
 }
 ```
 **Note de sécurité :** Pour un vrai projet en production, il est recommandé de gérer ces informations sensibles via des variables d'environnement plutôt qu'en les écrivant directement dans le code.
@@ -125,4 +125,3 @@ L'application utilise une architecture client-serveur :
 - **Backend :** Une API RESTful développée avec **Flask (Python)** qui sert les données géospatiales depuis une base de données PostGIS.
 - **Frontend :** Une interface utilisateur "single-page" construite avec **HTML, CSS et JavaScript pur**, utilisant **Leaflet.js** pour la cartographie.
 
-![Architecture Diagram](https://i.imgur.com/3s0Y3f5.png)
