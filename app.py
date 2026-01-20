@@ -79,7 +79,8 @@ def get_regions():
     productions_agg AS (
         SELECT 
             p.region_pcode,
-            json_agg(json_build_object('produit', p.produit, 'quantite', p.quantite, 'filiere', p.filiere)) as productions
+            json_agg(json_build_object('produit', p.produit, 'quantite', p.quantite, 'filiere', p.filiere)) as productions,
+            SUM(p.quantite) as total_production
         FROM productions_filtered p
         GROUP BY p.region_pcode
     )
@@ -87,7 +88,8 @@ def get_regions():
         ST_AsGeoJSON(r.geom) as geojson, 
         r.adm1_pcode, 
         r.adm1_name1,
-        pa.productions
+        pa.productions,
+        COALESCE(pa.total_production, 0) as total_production
     FROM regions r
     LEFT JOIN productions_agg pa ON r.adm1_pcode = pa.region_pcode
     """
@@ -122,19 +124,22 @@ def get_departments():
     ),
     productions_agg AS (
         SELECT 
-            p.region_pcode,
-            json_agg(json_build_object('produit', p.produit, 'quantite', p.quantite, 'filiere', p.filiere)) as productions
+            d.adm2_pcode,
+            json_agg(json_build_object('produit', p.produit, 'quantite', p.quantite, 'filiere', p.filiere)) as productions,
+            SUM(p.quantite) as total_production
         FROM productions_filtered p
-        GROUP BY p.region_pcode
+        JOIN departements d ON p.region_pcode = d.adm1_pcode
+        GROUP BY d.adm2_pcode
     )
     SELECT 
         ST_AsGeoJSON(d.geom) as geojson, 
         d.adm2_pcode, 
         d.adm2_name1,
         d.adm1_pcode,
-        pa.productions
+        pa.productions,
+        COALESCE(pa.total_production, 0) as total_production
     FROM departements d
-    LEFT JOIN productions_agg pa ON d.adm1_pcode = pa.region_pcode
+    LEFT JOIN productions_agg pa ON d.adm2_pcode = pa.adm2_pcode
     """
     
     params = {
@@ -174,20 +179,23 @@ def get_communes():
     ),
     productions_agg AS (
         SELECT 
-            p.region_pcode,
-            json_agg(json_build_object('produit', p.produit, 'quantite', p.quantite, 'filiere', p.filiere)) as productions
+            c.adm3_pcode,
+            json_agg(json_build_object('produit', p.produit, 'quantite', p.quantite, 'filiere', p.filiere)) as productions,
+            SUM(p.quantite) as total_production
         FROM productions_filtered p
-        GROUP BY p.region_pcode
+        JOIN departements d ON p.region_pcode = d.adm1_pcode
+        JOIN communes c ON d.adm2_pcode = c.adm2_pcode
+        GROUP BY c.adm3_pcode
     )
     SELECT 
         ST_AsGeoJSON(c.geom) as geojson, 
         c.adm3_pcode, 
         c.adm3_name1,
         c.adm2_pcode,
-        pa.productions
+        pa.productions,
+        COALESCE(pa.total_production, 0) as total_production
     FROM communes c
-    JOIN departements d ON c.adm2_pcode = d.adm2_pcode
-    LEFT JOIN productions_agg pa ON d.adm1_pcode = pa.region_pcode
+    LEFT JOIN productions_agg pa ON c.adm3_pcode = pa.adm3_pcode
     """
     
     params = {
@@ -225,48 +233,43 @@ def get_filieres():
     results = execute_query("SELECT DISTINCT filiere FROM productions ORDER BY filiere")
     return jsonify([r['filiere'] for r in results])
 
-@app.route('/api/heatmap')
-def get_heatmap_data():
-    filiere = request.args.get('filiere')
-    bassin = request.args.get('bassin')
-    region_pcode = request.args.get('region_pcode')
+
+@app.route('/api/comparison')
+def get_comparison_data():
     dept_pcode = request.args.get('department_pcode')
+    filiere = request.args.get('filiere', 'Tous')
+    bassin = request.args.get('bassin', 'Tous')
 
-    if not bassin or bassin == 'Tous':
-        return jsonify([])
+    if not dept_pcode:
+        return jsonify({'error': 'department_pcode is required'}), 400
 
-    base_query = """
-    SELECT ST_Y(ST_Centroid(geom)) as lat, ST_X(ST_Centroid(geom)) as lon, SUM(p.production_tonnes_estimee) as quantite
-    FROM productions p
+    query = """
+    WITH region_info AS (
+        SELECT adm1_pcode FROM departements WHERE adm2_pcode = :dept_pcode
+    ),
+    productions_in_region AS (
+        SELECT 
+            d.adm2_pcode,
+            d.adm2_name1,
+            SUM(p.production_tonnes_estimee) as total_production
+        FROM productions p
+        JOIN departements d ON p.region_pcode = d.adm1_pcode
+        WHERE d.adm1_pcode = (SELECT adm1_pcode FROM region_info)
+        AND (:filiere = 'Tous' OR p.filiere = :filiere)
+        AND (:bassin = 'Tous' OR p.produit = :bassin)
+        GROUP BY d.adm2_pcode, d.adm2_name1
+    )
+    SELECT * FROM productions_in_region ORDER BY total_production DESC;
     """
-    params = {'bassin': bassin}
-    group_by_geom = ''
-
-    if dept_pcode:
-        base_query += " JOIN communes c ON p.region_pcode = (SELECT adm1_pcode FROM departements WHERE adm2_pcode = c.adm2_pcode LIMIT 1)"
-        base_query += " WHERE c.adm2_pcode = :pcode AND p.produit = :bassin"
-        params['pcode'] = dept_pcode
-        group_by_geom = 'c.geom'
-    elif region_pcode:
-        base_query += " JOIN departements d ON p.region_pcode = d.adm1_pcode"
-        base_query += " WHERE d.adm1_pcode = :pcode AND p.produit = :bassin"
-        params['pcode'] = region_pcode
-        group_by_geom = 'd.geom'
-    else:
-        base_query += " JOIN regions r ON p.region_pcode = r.adm1_pcode"
-        base_query += " WHERE p.produit = :bassin"
-        group_by_geom = 'r.geom'
-
-    if filiere and filiere != 'Tous':
-        base_query += " AND p.filiere = :filiere"
-        params['filiere'] = filiere
     
-    base_query += f" GROUP BY {group_by_geom}"
-
-    results = execute_query(base_query, params)
-    heatmap_data = [[r['lat'], r['lon'], r['quantite']] for r in results if r['lat'] and r['lon']]
+    params = {
+        'dept_pcode': dept_pcode,
+        'filiere': filiere,
+        'bassin': bassin
+    }
     
-    return jsonify(heatmap_data)
+    result = execute_query(query, params)
+    return jsonify(result)
 
 if __name__ == '__main__':
     print("--- Lancement du serveur Flask... ---")

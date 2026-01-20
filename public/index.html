@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <title>Atlas des Productions - Cameroun</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-search@3.0.2/dist/leaflet-search.src.css" />
     <link href="https://fonts.googleapis.com/css2?family=Segoe+UI:wght@400;600;700&display=swap" rel="stylesheet">
     <style>
         :root { --primary: #1e4d2b; --accent: #fcd116; --danger: #ce1126; --bg: #f4f7f6; }
@@ -23,14 +24,84 @@
             width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #ddd; 
             background: #fff; font-size: 1rem; cursor: pointer; outline: none;
         }
-        select:focus { border-color: var(--primary); }
+        select:focus { border-color: var(--primary); box-shadow: 0 0 0 2px rgba(30, 77, 43, 0.2); }
         select:disabled { background: #f9f9f9; cursor: not-allowed; }
+
+        /* Scrollbar stylisée */
+        #sidebar::-webkit-scrollbar { width: 8px; }
+        #sidebar::-webkit-scrollbar-track { background: #f1f1f1; }
+        #sidebar::-webkit-scrollbar-thumb { background: #ccc; border-radius: 4px; }
+        #sidebar::-webkit-scrollbar-thumb:hover { background: #aaa; }
+
+        /* Switcher de vue moderne */
+        .view-switcher { display: flex; border: 1px solid #ddd; border-radius: 8px; overflow: hidden; }
+        .view-switcher .switch { flex: 1; }
+        .view-switcher input { display: none; }
+        .view-switcher .slider {
+            display: block; text-align: center; padding: 10px; cursor: pointer;
+            background: #fff; color: #555; transition: all 0.2s ease-in-out;
+        }
+        .view-switcher input:checked + .slider {
+            background: var(--primary); color: white; box-shadow: inset 0 1px 3px rgba(0,0,0,0.2);
+        }
 
         #map { flex-grow: 1; }
 
         /* Légende */
-        .legend { background: white; padding: 10px; border-radius: 8px; box-shadow: 0 0 10px rgba(0,0,0,0.2); line-height: 25px; }
-        .legend i { width: 18px; height: 18px; float: left; margin-right: 8px; border-radius: 3px; }
+        .legend {
+            background: white; 
+            padding: 15px; 
+            border-radius: 8px; 
+            box-shadow: 0 0 10px rgba(0,0,0,0.2); 
+            max-height: 350px; /* Hauteur maximale */
+            width: 280px; /* Largeur fixe */
+            overflow-y: auto; /* Scroll si contenu dépasse */
+        }
+        .legend h4 { margin: 0 0 10px; font-size: 1rem; color: var(--primary); }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            margin-bottom: 8px;
+            font-size: 0.9rem;
+        }
+        .legend-item i {
+            width: 18px; 
+            height: 18px; 
+            margin-right: 10px;
+            border-radius: 3px; 
+            flex-shrink: 0;
+        }
+        .legend-label { flex-grow: 1; }
+        .legend-quantity { font-weight: 600; color: #333; margin-left: 10px; }
+
+                /* Barre de recherche (style Google) */
+        .leaflet-control-search {
+            position: absolute;
+            left: 50%;
+            transform: translateX(-50%);
+            top: 20px;
+            z-index: 1000;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+            border-radius: 8px;
+            overflow: hidden;
+            background: white;
+        }
+        .leaflet-control-search .search-input {
+            height: 44px;
+            font-size: 16px;
+            width: 400px; /* Largeur augmentée */
+            border: none;
+            padding: 0 15px;
+        }
+        .leaflet-control-search .search-button {
+            height: 44px;
+            width: 44px;
+            background-size: 20px 20px;
+            background-position: center;
+        }
+        .leaflet-control-search.leaflet-control-collapsed .search-input {
+            display: block; /* Toujours visible */
+        }
 
         /* Modals */
         .modal { 
@@ -81,8 +152,14 @@
     <div class="filter-group">
         <label>TYPE DE VUE</label>
         <div class="view-switcher">
-            <label><input type="radio" name="view-type" value="symbols" checked> Symboles</label>
-            <label><input type="radio" name="view-type" value="heatmap"> Carte de chaleur</label>
+            <label class="switch">
+                <input type="radio" name="view-type" value="symbols" checked>
+                <span class="slider">Symboles</span>
+            </label>
+            <label class="switch">
+                <input type="radio" name="view-type" value="choropleth">
+                <span class="slider">Choroplèthe</span>
+            </label>
         </div>
     </div>
 
@@ -96,6 +173,10 @@
         <h3 id="modal-title">Détails</h3>
         <div id="modal-body">
             <canvas id="production-chart"></canvas>
+            <div id="comparison-container" style="margin-top: 30px; display: none;">
+                <h4 id="comparison-title">Comparaison Régionale</h4>
+                <canvas id="comparison-chart"></canvas>
+            </div>
         </div>
         <button class="btn-close" onclick="closeModal()">Fermer</button>
     </div>
@@ -103,7 +184,7 @@
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-<script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
+<script src="https://unpkg.com/leaflet-search@3.0.2/dist/leaflet-search.src.js"></script>
 <script>
     // 1. INITIALISATION DE LA CARTE (LIMITES CAMEROUN)
     const cmrBounds = [[1.5, 8.2], [13.2, 16.5]];
@@ -119,8 +200,8 @@
     // 2. VARIABLES
     let currentLayer = null;
     let productions = [];
-    let viewType = 'symbols'; // 'symbols' or 'heatmap'
-    let heatLayer = null;
+    let viewType = 'symbols'; // 'symbols' or 'choropleth'
+    let searchControl = null;
     let basinColors = {};
     const colorPalette = ['#e6194B', '#3cb44b', '#ffe119', '#4363d8', '#f58231', '#911eb4', '#46f0f0', '#f032e6', '#bcf60c', '#fabebe', '#008080', '#e6beff', '#9A6324', '#fffac8', '#800000', '#aaffc3', '#808000', '#ffd8b1', '#000075', '#a9a9a9'];
 
@@ -148,46 +229,25 @@
         commune: document.getElementById('commune-filter')
     };
 
-    async function updateMap() {
+        async function updateMap() {
         const params = new URLSearchParams({
             filiere: filters.filiere,
             bassin: filters.bassin
         });
 
-        if (viewType === 'symbols') {
-            heatLayer.setLatLngs([]);
-            if (!map.hasLayer(symbolLayer)) symbolLayer.addTo(map);
-            if (currentLayer && !map.hasLayer(currentLayer)) currentLayer.addTo(map);
-
-            let endpoint = '/api/regions';
-            if (filters.department) {
-                endpoint = '/api/communes';
-                params.append('department_pcode', filters.department);
-            } else if (filters.region) {
-                endpoint = '/api/departments';
-                params.append('region_pcode', filters.region);
-            }
-            const data = await fetch(`${endpoint}?${params.toString()}`).then(r => r.json());
-            displayLayer(data);
-        } else { // heatmap
-            symbolLayer.clearLayers();
-            if (currentLayer) map.removeLayer(currentLayer);
-            currentLayer = null;
-
-            if (filters.department) {
-                params.append('department_pcode', filters.department);
-            } else if (filters.region) {
-                params.append('region_pcode', filters.region);
-            }
-            await updateHeatmap(params);
+        let endpoint = '/api/regions';
+        if (filters.department) {
+            endpoint = '/api/communes';
+            params.append('department_pcode', filters.department);
+        } else if (filters.region) {
+            endpoint = '/api/departments';
+            params.append('region_pcode', filters.region);
         }
+        const data = await fetch(`${endpoint}?${params.toString()}`).then(r => r.json());
+        displayLayer(data);
     }
 
-    async function updateHeatmap(params) {
-        const data = await fetch(`/api/heatmap?${params.toString()}`).then(r => r.json());
-        heatLayer.setLatLngs(data);
-    }
-
+    
     async function populateDropdowns() {
         const [filieres, bassins, regionsData] = await Promise.all([
             fetch('/api/filieres').then(r => r.json()),
@@ -215,50 +275,130 @@
     }
 
     let symbolLayer = L.layerGroup().addTo(map);
-    heatLayer = L.heatLayer([], { radius: 25 }).addTo(map);
+    
+        function getChoroplethColor(d, max) {
+        const scale = max / 7;
+        return d > scale * 6 ? '#800026' :
+               d > scale * 5 ? '#BD0026' :
+               d > scale * 4 ? '#E31A1C' :
+               d > scale * 3 ? '#FC4E2A' :
+               d > scale * 2 ? '#FD8D3C' :
+               d > scale * 1 ? '#FEB24C' :
+               d > 0         ? '#FED976' :
+                               'transparent';
+    }
 
     function displayLayer(data) {
         if (currentLayer) map.removeLayer(currentLayer);
+        if (searchControl) map.removeControl(searchControl);
         symbolLayer.clearLayers();
 
+        const maxProd = Math.max(0, ...data.features.map(f => f.properties.total_production));
+        const productionTotals = new Map();
+
         currentLayer = L.geoJSON(data, {
-            style: () => ({ fillColor: 'transparent', weight: 1, color: '#333' })
+            style: (feature) => {
+                const style = { weight: 1, color: '#333', cursor: 'pointer' };
+                if (viewType === 'choropleth') {
+                    style.fillColor = getChoroplethColor(feature.properties.total_production, maxProd);
+                    style.fillOpacity = 0.7;
+                } else {
+                    style.fillColor = 'transparent';
+                }
+                return style;
+            },
+            onEachFeature: function(feature, layer) {
+                layer.on('click', () => showInfo(feature.properties));
+            }
         }).addTo(map);
 
-        data.features.forEach(feature => {
-            const productions = feature.properties.productions || [];
-            const bounds = L.geoJSON(feature).getBounds();
+        if (viewType === 'symbols') {
+            data.features.forEach(feature => {
+                const productions = feature.properties.productions || [];
+                const bounds = L.geoJSON(feature).getBounds();
 
-            let filteredProductions = productions;
-            if (filters.filiere !== 'Tous') {
-                filteredProductions = filteredProductions.filter(p => p.filiere === filters.filiere);
-            }
-            if (filters.bassin !== 'Tous') {
-                filteredProductions = filteredProductions.filter(p => p.produit === filters.bassin);
-            }
-
-            const totalQuantite = filteredProductions.reduce((sum, p) => sum + p.quantite, 0);
-            if (totalQuantite === 0) return;
-
-            filteredProductions.forEach(prod => {
-                const symbolCount = Math.ceil((prod.quantite / totalQuantite) * 50); // Max 50 symboles par zone
-                for (let i = 0; i < symbolCount; i++) {
-                    const lat = bounds.getSouth() + Math.random() * (bounds.getNorth() - bounds.getSouth());
-                    const lng = bounds.getWest() + Math.random() * (bounds.getEast() - bounds.getWest());
-                    
-                    L.circleMarker([lat, lng], {
-                        radius: 3,
-                        fillColor: getColor(prod.produit),
-                        color: '#fff',
-                        weight: 0.5,
-                        fillOpacity: 0.8
-                    }).bindTooltip(prod.produit).addTo(symbolLayer);
+                let filteredProductions = productions;
+                if (filters.filiere !== 'Tous') {
+                    filteredProductions = filteredProductions.filter(p => p.filiere === filters.filiere);
                 }
-            });
-        });
+                if (filters.bassin !== 'Tous') {
+                    filteredProductions = filteredProductions.filter(p => p.produit === filters.bassin);
+                }
 
-        if(data.features.length > 0) map.fitBounds(currentLayer.getBounds());
-        updateLegend();
+                const totalQuantite = filteredProductions.reduce((sum, p) => sum + p.quantite, 0);
+                if (totalQuantite === 0) return;
+
+                filteredProductions.forEach(prod => {
+                    productionTotals.set(prod.produit, (productionTotals.get(prod.produit) || 0) + prod.quantite);
+                    const symbolCount = Math.ceil((prod.quantite / totalQuantite) * 50);
+                    for (let i = 0; i < symbolCount; i++) {
+                        const lat = bounds.getSouth() + Math.random() * (bounds.getNorth() - bounds.getSouth());
+                        const lng = bounds.getWest() + Math.random() * (bounds.getEast() - bounds.getWest());
+                        
+                        L.circleMarker([lat, lng], {
+                            radius: 5,
+                            fillColor: getColor(prod.produit),
+                            color: '#fff',
+                            weight: 0.5,
+                            fillOpacity: 0.8
+                        }).bindTooltip(`${prod.produit}: <strong>${Math.round(prod.quantite)} tonnes</strong>`).addTo(symbolLayer);
+                    }
+                });
+            });
+        }
+
+        if(data.features.length > 0) {
+            if (currentLayer.getBounds().isValid()) {
+                map.fitBounds(currentLayer.getBounds());
+            }
+
+            const props = data.features[0].properties;
+            let propertyName = '';
+            if (props.adm3_pcode) propertyName = 'adm3_name1';
+            else if (props.adm2_pcode) propertyName = 'adm2_name1';
+            else if (props.adm1_pcode) propertyName = 'adm1_name1';
+
+            if (propertyName) {
+                searchControl = new L.Control.Search({
+                    layer: currentLayer,
+                    propertyName: propertyName,
+                    initial: true,
+                    collapsed: false,
+                    marker: false,
+                    textPlaceholder: 'Rechercher une localité...',
+                    textErr: 'Lieu non trouvé',
+                    minLength: 1,
+                    // Fonction de filtrage personnalisée pour une recherche insensible à la casse
+                    filterData: function(text, records) {
+                        const escapedText = L.Util.escapeRegex(text);
+                        const regex = new RegExp(escapedText, 'i'); // 'i' pour insensible à la casse
+                        const filteredRecords = {};
+
+                        for (const key in records) {
+                            const record = records[key];
+                            const propValue = record.layer.feature.properties[propertyName];
+                            if (propValue && regex.test(propValue)) {
+                                filteredRecords[key] = record;
+                            }
+                        }
+                        return filteredRecords;
+                    },
+                    moveToLocation: function(latlng, title, map) {
+                        map.setView(latlng, 12);
+                    }
+                });
+
+                // Réinitialiser la vue lorsque la recherche est effacée
+                searchControl.on('search:cleared', function() {
+                    if (currentLayer.getBounds().isValid()) {
+                        map.fitBounds(currentLayer.getBounds());
+                    }
+                });
+
+                map.addControl(searchControl);
+            }
+        }
+        updateLegend(maxProd, productionTotals);
     }
 
     document.querySelectorAll('input[name="view-type"]').forEach(radio => {
@@ -328,49 +468,70 @@
 
     // 6. MODAL INFOS
     let productionChart = null;
+    let comparisonChart = null;
 
-    function showInfo(props) {
+    async function showInfo(props) {
         const name = props.adm3_name1 || props.adm2_name1 || props.adm1_name1;
         document.getElementById('modal-title').innerText = `Productions : ${name}`;
         
         const prodsToShow = (props.productions || []).sort((a, b) => b.quantite - a.quantite);
 
-        const modalBody = document.getElementById('modal-body');
-        const canvas = document.getElementById('production-chart');
+        const productionCanvas = document.getElementById('production-chart');
+        const comparisonContainer = document.getElementById('comparison-container');
+        const comparisonCanvas = document.getElementById('comparison-chart');
 
-        if (productionChart) {
-            productionChart.destroy();
-        }
+        if (productionChart) productionChart.destroy();
+        if (comparisonChart) comparisonChart.destroy();
 
         if (prodsToShow.length > 0) {
+            productionCanvas.style.display = 'block';
             const labels = prodsToShow.map(p => p.produit);
             const data = prodsToShow.map(p => p.quantite);
             const backgroundColors = prodsToShow.map(p => getColor(p.produit));
 
-            productionChart = new Chart(canvas, {
+            productionChart = new Chart(productionCanvas, {
                 type: 'doughnut',
-                data: {
-                    labels: labels,
-                    datasets: [{
-                        label: 'Production (Tonnes)',
-                        data: data,
-                        backgroundColor: backgroundColors,
-                        borderColor: '#fff',
-                        borderWidth: 2
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    plugins: {
-                        legend: {
-                            position: 'top',
-                        }
-                    }
-                }
+                data: { labels, datasets: [{ label: 'Production (Tonnes)', data, backgroundColor: backgroundColors, borderWidth: 2 }] },
+                options: { responsive: true, plugins: { legend: { position: 'top' } } }
             });
-            modalBody.style.display = 'block';
         } else {
-            modalBody.innerHTML = '<p>Aucune donnée de production disponible pour cette zone.</p>';
+            productionCanvas.style.display = 'none';
+        }
+
+        if (props.adm2_pcode && props.adm1_pcode) { // C'est un département
+            const params = new URLSearchParams({ 
+                department_pcode: props.adm2_pcode, 
+                filiere: filters.filiere, 
+                bassin: filters.bassin 
+            });
+            const comparisonData = await fetch(`/api/comparison?${params.toString()}`).then(r => r.json());
+
+            if (comparisonData && comparisonData.length > 1) {
+                const labels = comparisonData.map(d => d.adm2_name1);
+                const data = comparisonData.map(d => d.total_production);
+                const backgroundColors = comparisonData.map(d => d.adm2_pcode === props.adm2_pcode ? 'var(--accent)' : 'var(--primary)');
+
+                comparisonChart = new Chart(comparisonCanvas, {
+                    type: 'bar',
+                    data: { labels, datasets: [{ label: 'Production Totale (Tonnes)', data, backgroundColor: backgroundColors }] },
+                    options: { 
+                        indexAxis: 'y', 
+                        responsive: true, 
+                        plugins: { legend: { display: false } },
+                        scales: { y: { ticks: { font: { size: 10 } } } }
+                    }
+                });
+                // We need the region name for the title, which isn't in the department's properties.
+                // A robust solution would be to fetch it, but for now, we'll try to find it from the dropdown.
+                const regionOption = selectors.region.options[selectors.region.selectedIndex];
+                const regionName = regionOption ? regionOption.text : 'la Région';
+                document.getElementById('comparison-title').innerText = `Comparaison des départements de ${regionName}`;
+                comparisonContainer.style.display = 'block';
+            } else {
+                comparisonContainer.style.display = 'none';
+            }
+        } else {
+            comparisonContainer.style.display = 'none';
         }
 
         document.getElementById('details-modal').style.display = 'flex';
@@ -385,21 +546,40 @@
     };
     legend.addTo(map);
 
-    function updateLegend() {
-        const legendDiv = document.querySelector('.legend');
-        const displayedBassins = new Set();
-        
-        symbolLayer.eachLayer(layer => {
-            const bassin = layer.getTooltip().getContent();
-            if(bassin) displayedBassins.add(bassin);
-        });
+        function updateLegend(maxProd, productionTotals) {
+            const legendDiv = document.querySelector('.legend');
+            let html = '';
 
-        let html = '<strong>Bassins de Production</strong><br>';
-        Array.from(displayedBassins).sort().forEach(bassin => {
-            html += `<i style="background:${getColor(bassin)}"></i> ${bassin}<br>`;
-        });
-        legendDiv.innerHTML = displayedBassins.size > 0 ? html : '<strong>Bassins de Production</strong><br>Aucun à afficher.';
-    }
+            if (viewType === 'choropleth') {
+                html = '<h4>Production (Tonnes)</h4>';
+                const scale = maxProd / 7;
+                const grades = [0, Math.round(scale), Math.round(scale * 2), Math.round(scale * 3), Math.round(scale * 4), Math.round(scale * 5), Math.round(scale * 6)];
+                for (let i = 0; i < grades.length; i++) {
+                    const color = getChoroplethColor(grades[i] + 1, maxProd);
+                    const from = grades[i];
+                    const to = grades[i + 1];
+                    html += `<div class="legend-item">
+                                <i style="background:${color}"></i> 
+                                <span class="legend-label">${from}${to ? '&ndash;' + to : '+'}</span>
+                             </div>`;
+                }
+            } else {
+                html = '<h4>Bassins de Production</h4>';
+                if (productionTotals && productionTotals.size > 0) {
+                    const sortedBassins = Array.from(productionTotals.entries()).sort((a, b) => b[1] - a[1]);
+                    sortedBassins.forEach(([bassin, total]) => {
+                        html += `<div class="legend-item">
+                                    <i style="background:${getColor(bassin)}"></i> 
+                                    <span class="legend-label">${bassin}</span>
+                                    <span class="legend-quantity">${Math.round(total)} t</span>
+                                 </div>`;
+                    });
+                } else {
+                    html += '<div class="legend-item">Aucun à afficher.</div>';
+                }
+            }
+            legendDiv.innerHTML = html;
+        }
 
     init();
 </script>
