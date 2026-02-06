@@ -9,18 +9,23 @@ from sqlalchemy import create_engine, text
 import urllib.parse
 from pathlib import Path
 from shapely.geometry import MultiPolygon
+import os
+from dotenv import load_dotenv
+from geoalchemy2 import Geometry
+
+
+load_dotenv()
 
 # ============================================
 # 1. CONFIGURATION DE LA CONNEXION
 # ============================================
 
-# À MODIFIER : remplacez 'votre_mot_de_passe' par le vrai mot de passe de l'utilisateur postgres
 DB_CONFIG = {
-    'host': 'localhost',
-    'port': 5432,
-    'database': 'cameroun_production_db',
-    'user': 'donpk',
-    'password': '18151995' 
+    'host': os.getenv('DATABASE_HOST', 'localhost'),
+    'port': int(os.getenv('DATABASE_PORT', 5432)),
+    'database': os.getenv('DATABASE_NAME', 'cameroun_production_db'),
+    'user': os.getenv('DATABASE_USER', 'donpk'),
+    'password': os.getenv('DATABASE_PASSWORD', '18151995')
 }
 
 # Chemins vers les fichiers de données
@@ -108,29 +113,57 @@ def load_all_data(engine):
             conn.execute(text("DROP TABLE IF EXISTS communes CASCADE;"))
             conn.execute(text("DROP TABLE IF EXISTS departements CASCADE;"))
             conn.execute(text("DROP TABLE IF EXISTS regions CASCADE;"))
-            conn.commit() # Très important pour valider la suppression
+            conn.commit()
         print("✓ Anciennes tables supprimées.")
 
         # --- RÉGIONS ---
         print("--- Chargement des régions ---")
         gdf_r = gpd.read_file(FILES['regions'])
         gdf_r_clean = process_gdf(gdf_r, 'adm1_pcode', 'adm1_name1')
-        # On utilise 'append' maintenant car on a déjà supprimé la table manuellement au-dessus
-        gdf_r_clean.to_postgis('regions', engine, if_exists='append', index=False)
+        #gdf_r_clean.to_postgis('regions', engine, if_exists='append', index=False)
+        gdf_r_clean.to_postgis(
+            name='regions',
+            con=engine,
+            if_exists='replace',
+            index=False,
+            dtype={
+                'geom': Geometry('MULTIPOLYGON', srid=4326)
+            }
+        )
+
         print(f"✓ {len(gdf_r_clean)} régions chargées.")
 
         # --- DÉPARTEMENTS ---
         print("--- Chargement des départements ---")
         gdf_d = gpd.read_file(FILES['departements'])
         gdf_d_clean = process_gdf(gdf_d, 'adm2_pcode', 'adm2_name1', 'adm1_pcode')
-        gdf_d_clean.to_postgis('departements', engine, if_exists='append', index=False)
+        #gdf_d_clean.to_postgis('departements', engine, if_exists='append', index=False)
+        gdf_d_clean.to_postgis(
+            name='departements',
+            con=engine,
+            if_exists='replace',
+            index=False,
+            chunksize=500,
+            dtype={
+                'geom': Geometry('MULTIPOLYGON', srid=4326)
+            }
+        )
         print(f"✓ {len(gdf_d_clean)} départements chargés.")
 
         # --- COMMUNES ---
         print("--- Chargement des communes ---")
         gdf_c = gpd.read_file(FILES['communes'])
         gdf_c_clean = process_gdf(gdf_c, 'adm3_pcode', 'adm3_name1', 'adm2_pcode')
-        gdf_c_clean.to_postgis('communes', engine, if_exists='append', index=False)
+        gdf_c_clean.to_postgis(
+            name='communes',
+            con=engine,
+            if_exists='replace',
+            index=False,
+            chunksize=500,
+            dtype={
+                'geom': Geometry('MULTIPOLYGON', srid=4326)
+            }
+        )
         print(f"✓ {len(gdf_c_clean)} communes chargées.")
 
         # --- PRODUCTIONS (CSV) ---
@@ -144,7 +177,10 @@ def load_all_data(engine):
         return True
     except Exception as e:
         print(f"✗ Erreur pendant le chargement : {e}")
+        import traceback
+        traceback.print_exc()
         return False
+
 # ============================================
 # 3. EXECUTION PRINCIPALE
 # ============================================
@@ -161,11 +197,18 @@ def main():
         print(e)
         return
 
-    # Connexion
-    engine = create_engine(create_connection_string(DB_CONFIG))
+    # Connexion avec timeout desactive pour les chargements volumineux
+    engine = create_engine(
+        create_connection_string(DB_CONFIG),
+        connect_args={
+            "connect_timeout": 10,
+            "options": "-c statement_timeout=0"
+        },
+        pool_pre_ping=True
+    )
+    
     if not test_connection(engine):
         print("\nConseil : Assurez-vous d'avoir créé la base de données et activé PostGIS")
-        print("SQL : CREATE DATABASE cameroun_production_db; \\c ...; CREATE EXTENSION postgis;")
         return
 
     # Chargement

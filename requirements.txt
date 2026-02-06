@@ -8,11 +8,14 @@ GeoAlchemy2==0.14.2
 psycopg2-binary==2.9.9
 
 # Traitement de données géospatiales
-# Note: On laisse pip installer les dernières versions compatibles
-# au lieu de forcer des versions qui nécessitent compilation
-geopandas==0.12.2
-pandas
+# Versions compatibles avec GDAL 3.8
+Fiona>=1.9.5
+geopandas>=0.14.0
+pandas==2.1.4
 numpy
-Fiona==1.9.1
-pyproj==3.4.1
-Shapely==2.0.1
+pyproj>=3.6.0
+Shapely>=2.0.2
+
+#deploiement
+python-dotenv==1.0.0
+gunicorn==21.2.0

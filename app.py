@@ -2,23 +2,34 @@ from flask import Flask, jsonify, request
 from flask_cors import CORS
 from sqlalchemy import create_engine, text
 import json
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+DB_CONFIG = {
+    'host': os.getenv('DATABASE_HOST', 'localhost'),
+    'port': int(os.getenv('DATABASE_PORT', 5432)),
+    'database': os.getenv('DATABASE_NAME', 'cameroun_production_db'),
+    'user': os.getenv('DATABASE_USER', 'donpk'),
+    'password': os.getenv('DATABASE_PASSWORD', '18151995')
+}
 
 print("--- Démarrage du script app.py ---")
 
 app = Flask(__name__, static_folder='public', static_url_path='')
 CORS(app)
 
-DB_CONFIG = {
-    'host': 'localhost',
-    'port': 5432,
-    'database': 'cameroun_production_db',
-    'user': 'donpk',
-    'password': '18151995' 
-}
-
 def get_engine():
     connection_string = f"postgresql://{DB_CONFIG['user']}:{DB_CONFIG['password']}@{DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['database']}"
-    return create_engine(connection_string, pool_pre_ping=True)
+    return create_engine(
+        connection_string, 
+        pool_pre_ping=True,
+        connect_args={
+            "connect_timeout": 10,
+            "options": "-c statement_timeout=30000"
+        }
+    )
 
 print("--- Création du moteur de base de données... ---")
 engine = get_engine()
